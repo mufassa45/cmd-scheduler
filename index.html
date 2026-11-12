@@ -114,6 +114,42 @@ header .sync-chip.st-bad{background:#b91c1c}
   .pchip{border-left:4px solid #444;padding:2px 0 2px 6px;margin:0 0 6px;break-inside:avoid;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   #printArea h2{font-size:14px;margin:14px 0 6px}
 }
+
+.cal-tools{margin-bottom:4px}
+.mcal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff;margin-bottom:10px}
+.mcal .dow{font-size:11px;text-align:center;padding:8px 2px;background:#f3f6f6;font-weight:700;color:var(--m);border-bottom:1px solid var(--line)}
+.mcal .mday{min-height:92px;padding:4px 3px 6px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);cursor:pointer;position:relative;background:#fff;min-width:0}
+.mcal .mday:nth-child(7n){border-right:0}
+.mcal .mday.out{background:#fafafa;color:#98a2ad}
+.mcal .mday.today{background:#e7f3f5}
+.mcal .mday.has-open{background:#fff6f3}
+.mcal .mday.out.today{background:#eef4f5}
+.mcal .mdn{font-size:12px;font-weight:700;line-height:1.2;margin-bottom:3px;display:flex;align-items:center;justify-content:space-between;gap:2px}
+.mcal .mflag{width:8px;height:8px;border-radius:50%;background:var(--danger);flex:0 0 8px;box-shadow:0 0 0 2px #fff}
+.mchip{background:var(--c,#444);color:#fff;border-radius:5px;padding:2px 4px;font-size:10px;font-weight:700;margin-bottom:2px;line-height:1.2;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.mchip.open{background:#fff;color:var(--open);box-shadow:inset 0 0 0 1.5px var(--open)}
+.mchip.bad{outline:2px solid var(--danger);outline-offset:0}
+.mmore{font-size:10px;color:var(--m);font-weight:700;padding:1px 2px}
+.mdotwrap{display:none;flex-wrap:wrap;align-items:center;gap:3px;margin-top:2px}
+.mdot{width:8px;height:8px;border-radius:50%;flex:0 0 8px;background:var(--c,#444);box-shadow:inset 0 0 0 1px #0002}
+.mdot.open{background:#fff;box-shadow:inset 0 0 0 1.5px var(--open)}
+.mdot.bad{box-shadow:0 0 0 1.5px var(--danger)}
+.mdot-n{font-size:10px;font-weight:700;color:var(--m)}
+.mfilt-select{margin:0 0 8px}
+@media (max-width:560px){
+  .mcal .mday{min-height:70px;padding:3px 2px 4px}
+  .mcal .mchip,.mcal .mmore{display:none}
+  .mcal .mdotwrap{display:flex}
+  .mcal .mdn{font-size:11px}
+}
+@media print{
+  .mprint{width:100%}
+  .mprint table.mgrid{width:100%;border-collapse:collapse;table-layout:fixed}
+  .mprint table.mgrid th,.mprint table.mgrid td{border:1px solid #ccc;padding:4px;vertical-align:top;height:88px}
+  .mprint table.mgrid th{background:#eef3f3;text-align:center;height:auto;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .mprint .out{color:#888;background:#fafafa}
+  .mprint .today{background:#e7f3f5;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
 </style></head><body>
 <header><div class="hdr-row"><div><h1>CMD Onsite Schedule</h1><small id="hdr"></small></div>
 <button type="button" class="sync-chip" id="syncChip" data-act="go-sync">Sync</button></div></header>
@@ -243,7 +279,66 @@ function formatWeekCSV(shifts,employees,sites,templates,weekStart){
   }
   return rows.join("\n")+(rows.length?"\n":"");
 }
-if(typeof module!=="undefined")module.exports={isoDate,today,parseDate,addDays,startOfWeek,weekDates,parseHHMM,fmtHHMM,prettyTime,shiftHours,shiftInterval,overlaps,restHours,fmtHours,shortName,weekdayName,formatMD,formatWeekLabel,weekHours,hoursByEmployee,findConflicts,openShifts,copyWeek,copyDay,repeatShift,formatEmployeeShare,csvEscape,formatWeekCSV};
+
+function startOfMonth(dateStr){const dt=parseDate(dateStr);dt.setDate(1);return isoDate(dt);}
+function endOfMonth(dateStr){const dt=parseDate(startOfMonth(dateStr));dt.setMonth(dt.getMonth()+1,0);return isoDate(dt);}
+function addMonths(dateStr,n){const dt=parseDate(startOfMonth(dateStr));dt.setMonth(dt.getMonth()+(+n||0));return isoDate(dt);}
+function monthDates(monthStart){const start=startOfMonth(monthStart),end=endOfMonth(monthStart);const out=[];for(let d=start;d<=end;d=addDays(d,1))out.push(d);return out;}
+function monthGridDates(monthStart,weekStartsOn){const start=startOfMonth(monthStart),end=endOfMonth(monthStart);const gridStart=startOfWeek(start,weekStartsOn??0);const gridEnd=addDays(startOfWeek(end,weekStartsOn??0),6);const out=[];for(let d=gridStart;d<=gridEnd;d=addDays(d,1))out.push(d);return out;}
+function inMonth(dateStr,monthStart){const start=startOfMonth(monthStart);return dateStr>=start&&dateStr<=endOfMonth(start);}
+function formatMonthLabel(monthStart){const dt=parseDate(startOfMonth(monthStart));return ["January","February","March","April","May","June","July","August","September","October","November","December"][dt.getMonth()]+" "+dt.getFullYear();}
+function weekdayHeaders(weekStartsOn,kind){const src=kind==="long"?["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"]:["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];const s=((+weekStartsOn||0)%7+7)%7;return src.slice(s).concat(src.slice(0,s));}
+function initials(name){const p=String(name||"").trim().split(/\s+/).filter(Boolean);if(!p.length)return"—";if(p.length===1)return p[0].slice(0,2).toUpperCase();return(p[0][0]+p[p.length-1][0]).toUpperCase();}
+function siteAbbrev(name){const p=String(name||"").trim().split(/\s+/).filter(w=>/[A-Za-z0-9]/.test(w));if(!p.length)return"?";if(p.length===1)return p[0].slice(0,3);return p.map(w=>w[0]).join("").slice(0,3).toUpperCase();}
+function filterMonthShifts(shifts,monthStart,filter){const set=new Set(monthDates(monthStart));filter=filter||{type:"all"};return shifts.filter(s=>{if(!set.has(s.date))return false;if(filter.type==="site"&&filter.id&&s.siteId!==filter.id)return false;if(filter.type==="employee"&&filter.id&&s.employeeId!==filter.id)return false;return true;});}
+function monthHours(shifts,employeeId,monthStart,filter){return filterMonthShifts(shifts,monthStart,filter).filter(s=>s.employeeId===employeeId).reduce((sum,s)=>sum+shiftHours(s.start,s.end),0);}
+function hoursByEmployeeMonth(shifts,employees,monthStart,filter){return employees.map(e=>({employeeId:e.id,name:e.name,role:e.role,hours:monthHours(shifts,e.id,monthStart,filter)}));}
+function openShiftsMonth(shifts,monthStart,filter){return filterMonthShifts(shifts,monthStart,filter).filter(s=>!s.employeeId);}
+function findConflictsMonth(shifts,settings){
+  const monthStart=startOfMonth(settings.monthStart),weekStartsOn=settings.weekStartsOn??0;
+  const monthSet=new Set(monthDates(monthStart));
+  const first=startOfWeek(addDays(monthStart,-1),weekStartsOn),last=endOfMonth(monthStart);
+  const byId=Object.fromEntries((shifts||[]).map(s=>[s.id,s]));
+  const seen=new Set(),issues=[];
+  for(let w=first;w<=last;w=addDays(w,7)){
+    const weekSet=new Set(weekDates(w));
+    const weekIntersects=[...weekSet].some(d=>monthSet.has(d));
+    const part=findConflicts(shifts,{minRestHours:settings.minRestHours,maxWeekHours:settings.maxWeekHours,weekStart:w});
+    for(const i of part){
+      if(i.type==="overhours"&&!weekIntersects)continue;
+      if(i.type!=="overhours"){
+        const dates=i.dates||[];
+        const touches=dates.some(d=>monthSet.has(d))||(i.shiftIds||[]).some(id=>{const s=byId[id];return s&&monthSet.has(s.date);});
+        if(!touches)continue;
+      }
+      const key=i.type+"|"+i.employeeId+"|"+(i.shiftIds||[]).slice().sort().join(",")+"|"+(i.dates||[]).join(",");
+      if(seen.has(key))continue;
+      seen.add(key);
+      issues.push(i);
+    }
+  }
+  return issues;
+}
+function formatMonthCSV(shifts,employees,sites,templates,monthStart,filter){
+  const dates=monthDates(monthStart);
+  const empBy=Object.fromEntries((employees||[]).map(e=>[e.id,e]));
+  const siteBy=Object.fromEntries((sites||[]).map(s=>[s.id,s]));
+  const tplBy=Object.fromEntries((templates||[]).map(t=>[t.id,t]));
+  const header=["Date","Day","Site","Client","Shift","Start","End","Hours","Employee","Role","Phone"];
+  const monthShifts=filterMonthShifts(shifts,monthStart,filter).slice().sort((a,b)=>{
+    if(a.date!==b.date)return a.date<b.date?-1:1;
+    const sa=parseHHMM(a.start)||0,sb=parseHHMM(b.start)||0;if(sa!==sb)return sa-sb;
+    const na=(siteBy[a.siteId]||{}).name||"",nb=(siteBy[b.siteId]||{}).name||"";return na<nb?-1:na>nb?1:0;
+  });
+  const rows=[header.join(",")];
+  for(const s of monthShifts){
+    const emp=empBy[s.employeeId]||{},site=siteBy[s.siteId]||{},tpl=tplBy[s.templateId]||{};
+    rows.push([s.date,weekdayName(s.date,"short"),site.name||"",site.client||"",tpl.name||"Custom",prettyTime(s.start),prettyTime(s.end),fmtHours(shiftHours(s.start,s.end)),emp.name||"OPEN",emp.role||"",emp.phone||""].map(csvEscape).join(","));
+  }
+  return rows.join("\n")+(rows.length?"\n":"");
+}
+
+if(typeof module!=="undefined")module.exports={isoDate,today,parseDate,addDays,startOfWeek,weekDates,parseHHMM,fmtHHMM,prettyTime,shiftHours,shiftInterval,overlaps,restHours,fmtHours,shortName,weekdayName,formatMD,formatWeekLabel,weekHours,hoursByEmployee,findConflicts,openShifts,copyWeek,copyDay,repeatShift,formatEmployeeShare,csvEscape,formatWeekCSV,startOfMonth,endOfMonth,addMonths,monthDates,monthGridDates,inMonth,formatMonthLabel,weekdayHeaders,initials,siteAbbrev,filterMonthShifts,monthHours,hoursByEmployeeMonth,openShiftsMonth,findConflictsMonth,formatMonthCSV};
 
 </script>
 <script>
@@ -548,7 +643,7 @@ function restoreBackup(){
 }
 
 let S=load();
-let UI={week:startOfWeek(today(),S.settings.weekStartsOn),mode:S.settings.viewMode||"site",tab:"week",sheet:null,toastT:null,copyFrom:null,roleFilt:"",empFilt:""};
+let UI={week:startOfWeek(today(),S.settings.weekStartsOn),month:startOfMonth(today()),cal:"week",mode:S.settings.viewMode||"site",mfiltType:"all",mfiltId:"",tab:"week",sheet:null,toastT:null,copyFrom:null,roleFilt:"",empFilt:""};
 
 function emp(id){return S.employees.find(e=>e.id===id);}
 function site(id){return S.sites.find(s=>s.id===id);}
@@ -594,6 +689,7 @@ function renderWeek(){
   const rows=mode==="site"?S.sites:S.employees;
   const open=openShifts(S.shifts,UI.week);
   let h=`<div class="toolbar no-print">
+    ${calToggleHtml()}
     <div class="row tight"><button class="s ico" data-act="prev-week" aria-label="Previous week">‹</button>
     <button class="s grow" data-act="this-week">${esc(formatWeekLabel(UI.week))}</button>
     <button class="s ico" data-act="next-week" aria-label="Next week">›</button></div>
@@ -651,6 +747,281 @@ function renderWeek(){
   $("weekOut").innerHTML=h;
 }
 
+
+function cleanLabel(name){const s=String(name||"").replace(/^Example\s*[–-]\s*/i,"").trim();return s||String(name||"");}
+function calToggleHtml(){
+  return `<div class="seg cal-tools" role="tablist">
+    <button class="${UI.cal!=="month"?"on":""}" data-act="cal" data-cal="week">Week</button>
+    <button class="${UI.cal==="month"?"on":""}" data-act="cal" data-cal="month">Month</button>
+  </div>`;
+}
+function monthFilter(){return{type:UI.mfiltType||"all",id:UI.mfiltId||""};}
+function monthSettings(){return{minRestHours:+S.settings.minRestHours||8,maxWeekHours:+S.settings.maxWeekHours||60,weekStartsOn:+S.settings.weekStartsOn||0,monthStart:UI.month};}
+function conflictsThisMonth(){return findConflictsMonth(S.shifts,monthSettings());}
+function conflictDatesForMonth(issues){
+  const dates=new Set();
+  const byId=Object.fromEntries(S.shifts.map(s=>[s.id,s]));
+  const monthStart=startOfMonth(UI.month);
+  for(const c of issues){
+    if(c.type==="overhours"){
+      const wk=c.dates&&c.dates[0];
+      if(wk){
+        for(const d of weekDates(wk)){
+          if(inMonth(d,monthStart)&&S.shifts.some(s=>s.date===d&&s.employeeId===c.employeeId))dates.add(d);
+        }
+      }
+      continue;
+    }
+    for(const d of(c.dates||[])){if(inMonth(d,monthStart))dates.add(d);}
+    for(const id of(c.shiftIds||[])){const s=byId[id];if(s&&inMonth(s.date,monthStart))dates.add(s.date);}
+  }
+  return dates;
+}
+function monthFiltSelectHtml(){
+  const type=UI.mfiltType||"all";
+  let h=`<div class="seg" role="tablist">
+    <button class="${type==="all"?"on":""}" data-act="mfilt" data-type="all">All</button>
+    <button class="${type==="site"?"on":""}" data-act="mfilt" data-type="site">By site</button>
+    <button class="${type==="employee"?"on":""}" data-act="mfilt" data-type="employee">By person</button>
+  </div>`;
+  if(type==="site"){
+    const list=S.sites;
+    if(!list.length)h+=`<p class="mut">Add a job site in Setup first.</p>`;
+    else h+=`<select class="mfilt-select" id="mfiltSel" data-act="mfilt-id">${list.map(si=>`<option value="${esc(si.id)}" ${si.id===UI.mfiltId?"selected":""}>${esc(si.name)}</option>`).join("")}</select>`;
+  }else if(type==="employee"){
+    const list=S.employees;
+    if(!list.length)h+=`<p class="mut">Add staff in Setup first.</p>`;
+    else h+=`<select class="mfilt-select" id="mfiltSel" data-act="mfilt-id">${list.map(e=>`<option value="${esc(e.id)}" ${e.id===UI.mfiltId?"selected":""}>${esc(e.name)}</option>`).join("")}</select>`;
+  }
+  return h;
+}
+function ensureMonthFiltId(){
+  if(UI.mfiltType==="site"){
+    if(!S.sites.some(s=>s.id===UI.mfiltId))UI.mfiltId=S.sites[0]?S.sites[0].id:"";
+  }else if(UI.mfiltType==="employee"){
+    if(!S.employees.some(e=>e.id===UI.mfiltId))UI.mfiltId=S.employees[0]?S.employees[0].id:"";
+  }else UI.mfiltId="";
+}
+
+function renderMonth(){
+  ensureMonthFiltId();
+  const monthStart=startOfMonth(UI.month);
+  UI.month=monthStart;
+  const weekStartsOn=+S.settings.weekStartsOn||0;
+  const grid=monthGridDates(monthStart,weekStartsOn);
+  const heads=weekdayHeaders(weekStartsOn,"short");
+  const todayStr=today();
+  const filter=monthFilter();
+  const visible=filterMonthShifts(S.shifts,monthStart,filter);
+  const issues=conflictsThisMonth();
+  const visibleIssues=issues.filter(c=>{
+    if(filter.type==="employee"&&filter.id)return c.employeeId===filter.id;
+    if(filter.type==="site"&&filter.id){
+      const ids=new Set(visible.map(s=>s.id));
+      return(c.shiftIds||[]).some(id=>ids.has(id))||(c.type==="overhours"&&S.shifts.some(s=>s.employeeId===c.employeeId&&s.siteId===filter.id&&inMonth(s.date,monthStart)));
+    }
+    return true;
+  });
+  const confShift=new Set(visibleIssues.flatMap(c=>c.shiftIds||[]));
+  const confDays=conflictDatesForMonth(visibleIssues);
+  const open=openShiftsMonth(S.shifts,monthStart,filter);
+  const byDate={};
+  for(const s of S.shifts){
+    if(filter.type==="site"&&filter.id&&s.siteId!==filter.id)continue;
+    if(filter.type==="employee"&&filter.id&&s.employeeId!==filter.id)continue;
+    (byDate[s.date]||=[]).push(s);
+  }
+  for(const d of Object.keys(byDate))byDate[d].sort((a,b)=>(parseHHMM(a.start)||0)-(parseHHMM(b.start)||0));
+
+  let h=`<div class="toolbar no-print">
+    ${calToggleHtml()}
+    <div class="row tight"><button class="s ico" data-act="prev-month" aria-label="Previous month">‹</button>
+    <button class="s grow" data-act="this-month">${esc(formatMonthLabel(monthStart))}</button>
+    <button class="s ico" data-act="next-month" aria-label="Next month">›</button></div>
+    <div class="row tight"><button class="s" data-act="this-month">Today</button>
+    <button class="s" data-act="print-month">Print</button>
+    <button class="s" data-act="csv-month">CSV</button></div>
+    ${monthFiltSelectHtml()}
+  </div>`;
+  if(visibleIssues.length){
+    h+=`<div class="banner warn no-print"><b>${visibleIssues.length} conflict${visibleIssues.length>1?"s":""} this month</b>
+      <ul>${visibleIssues.map(c=>{const e=emp(c.employeeId);return `<li>${esc((e&&e.name)||"Staff")}: ${esc(c.message)}</li>`;}).join("")}</ul></div>`;
+  }
+  if(open.length)h+=`<div class="banner open no-print"><b>${open.length} open shift${open.length>1?"s":""} this month</b> — unfilled days are highlighted.</div>`;
+  if(!S.sites.length||!S.employees.length){
+    h+=`<div class="card"><p>Add your staff and job sites in <button class="link" data-act="go" data-tab="setup">Setup</button>, then tap a day to add shifts.</p></div>`;
+  }
+  h+=`<div class="mcal">`;
+  h+=heads.map(n=>`<div class="dow">${esc(n)}</div>`).join("");
+  const maxChips=3;
+  for(const d of grid){
+    const inM=inMonth(d,monthStart);
+    const list=byDate[d]||[];
+    const isOpen=list.some(s=>!s.employeeId);
+    const warn=confDays.has(d);
+    h+=`<div class="mday ${inM?"":"out"} ${d===todayStr?"today":""} ${isOpen?"has-open":""}" data-act="month-day" data-date="${d}">
+      <div class="mdn"><span>${parseDate(d).getDate()}</span>${warn?`<span class="mflag" title="Conflict"></span>`:""}</div>`;
+    const shown=list.slice(0,maxChips);
+    const rest=list.length-shown.length;
+    for(const s of shown){
+      const t=tpl(s.templateId),e=emp(s.employeeId),si=site(s.siteId);
+      const color=(t&&t.color)||"#44403c";
+      const who=e?initials(cleanLabel(e.name)):"OPEN";
+      const siteA=si?siteAbbrev(cleanLabel(si.name)):"?";
+      const bad=confShift.has(s.id);
+      h+=`<div class="mchip ${s.employeeId?"":"open"} ${bad?"bad":""}" style="--c:${safeColor(color)}">${esc(who)} · ${esc(siteA)}</div>`;
+    }
+    if(rest>0)h+=`<div class="mmore">+${rest} more</div>`;
+    if(list.length){
+      h+=`<div class="mdotwrap">`;
+      const dotMax=6;
+      const dots=list.slice(0,dotMax);
+      for(const s of dots){
+        const t=tpl(s.templateId);
+        const color=(t&&t.color)||"#44403c";
+        const bad=confShift.has(s.id);
+        h+=`<span class="mdot ${s.employeeId?"":"open"} ${bad?"bad":""}" style="--c:${safeColor(color)}"></span>`;
+      }
+      h+=`<span class="mdot-n">${list.length}</span></div>`;
+    }
+    h+=`</div>`;
+  }
+  h+=`</div>`;
+  const hours=hoursByEmployeeMonth(S.shifts,S.employees,monthStart,filter);
+  if(S.employees.length){
+    const shownHours=filter.type==="employee"&&filter.id?hours.filter(x=>x.employeeId===filter.id):hours.filter(x=>x.hours>0||filter.type==="all");
+    if(shownHours.length){
+      h+=`<div class="hours-strip no-print"><span><b>Month totals</b></span><span class="dotsep">·</span>${shownHours.map(x=>{
+        const e=emp(x.employeeId);
+        return `<span>${esc(e?shortName(cleanLabel(e.name)):"?")} <b>${fmtHours(x.hours)}h</b></span>`;
+      }).join("<span class='dotsep'>·</span>")}${open.length?`<span class="dotsep">·</span><span class="bad">${open.length} open</span>`:""}</div>`;
+    }
+  }
+  $("weekOut").innerHTML=h;
+  const sel=$("mfiltSel");
+  if(sel)sel.addEventListener("change",()=>{UI.mfiltId=sel.value;render();});
+}
+
+function showDayDetail(date){
+  ensureMonthFiltId();
+  const filter=monthFilter();
+  UI.sheet={type:"dayDetail",date,from:"dayDetail",mode:filter.type==="employee"?"employee":"site",id:filter.type==="employee"?filter.id:filter.type==="site"?filter.id:""};
+  let list=S.shifts.filter(s=>s.date===date);
+  if(filter.type==="site"&&filter.id)list=list.filter(s=>s.siteId===filter.id);
+  if(filter.type==="employee"&&filter.id)list=list.filter(s=>s.employeeId===filter.id);
+  list.sort((a,b)=>(parseHHMM(a.start)||0)-(parseHHMM(b.start)||0));
+  const issues=findConflictsMonth(S.shifts,monthSettings());
+  const confShift=new Set(issues.flatMap(c=>c.shiftIds||[]));
+  let h=`<div class="sheet-h"><h2>${esc(weekdayName(date,"long")+" "+formatMD(date))}</h2><button class="x" data-act="close" aria-label="Close">✕</button></div>`;
+  if(!inMonth(date,UI.month))h+=`<p class="mut">${esc(formatMonthLabel(date))}</p>`;
+  if(!list.length)h+=`<p class="mut">No shifts this day${filter.type!=="all"?" in this filter":""}. Tap below to add one.</p>`;
+  for(const s of list){
+    const t=tpl(s.templateId),e=emp(s.employeeId),si=site(s.siteId);
+    const color=(t&&t.color)||"#44403c";
+    h+=`<button class="card-btn" data-act="edit-shift" data-sid="${s.id}">
+      <div class="chip ${s.employeeId?"":"open"} ${confShift.has(s.id)?"bad":""}" style="--c:${safeColor(color)}">${esc((t&&t.name)||"Custom")} ${prettyTime(s.start)}–${prettyTime(s.end)}</div>
+      <div><b>${esc(e?e.name:"OPEN — unfilled")}</b>${e&&e.role?`<div class="mut">${esc(e.role)}</div>`:""}
+      <div class="mut">${esc(si?si.name:"")}</div></div></button>`;
+  }
+  h+=`<button data-act="add-day-shift" data-date="${date}">+ Add shift</button>`;
+  h+=`<div class="row tight"><button class="s" data-act="copy-day-start" data-date="${date}">Copy this day…</button>
+    <button class="s" data-act="clear-day" data-date="${date}">Clear this day</button></div>`;
+  openSheet(h);
+}
+
+function showAddPick(date){
+  UI.sheet={type:"addPick",date,from:"dayDetail"};
+  if(S.sites.length===1){beginAddFromDay(date,S.sites[0].id);return;}
+  let h=`<div class="sheet-h"><h2>Add shift · ${esc(weekdayName(date,"short")+" "+formatMD(date))}</h2><button class="x" data-act="back-day" data-date="${date}" aria-label="Back">✕</button></div>
+    <p class="mut">Pick a job site, then choose the shift and who works it.</p>
+    <div class="pick-list">`;
+  for(const si of S.sites){
+    h+=`<button type="button" class="pick" data-act="add-day-site" data-id="${si.id}" data-date="${date}"><b>${esc(si.name)}</b>${si.client?`<span class="mut">${esc(si.client)}</span>`:""}</button>`;
+  }
+  if(!S.sites.length)h+=`<p class="mut">Add a job site in Setup first.</p>`;
+  h+=`</div>`;
+  openSheet(h);
+}
+function beginAddFromDay(date,siteId){
+  const filter=monthFilter();
+  if(filter.type==="employee"&&filter.id){
+    UI.sheet={type:"add",mode:"employee",id:filter.id,date,templateId:S.templates[0]?S.templates[0].id:"",employeeId:filter.id,siteId:siteId||"",extra:0,from:"dayDetail"};
+    shiftForm({mode:"employee",id:filter.id,date,existing:null});
+    return;
+  }
+  const sid=siteId||(filter.type==="site"?filter.id:"");
+  if(!sid){showAddPick(date);return;}
+  UI.sheet={type:"add",mode:"site",id:sid,date,templateId:S.templates[0]?S.templates[0].id:"",employeeId:"",siteId:sid,extra:0,from:"dayDetail"};
+  shiftForm({mode:"site",id:sid,date,existing:null});
+}
+function returnToDayOrCell(){
+  if(UI.sheet&&(UI.sheet.from==="dayDetail"||UI.sheet.type==="dayDetail")){
+    showDayDetail(UI.sheet.date);
+    return;
+  }
+  if(UI.sheet&&UI.sheet.mode&&UI.sheet.id&&UI.sheet.date)showCell(UI.sheet.mode,UI.sheet.id,UI.sheet.date);
+  else closeSheet();
+}
+
+function printMonth(){
+  const monthStart=startOfMonth(UI.month);
+  const weekStartsOn=+S.settings.weekStartsOn||0;
+  const grid=monthGridDates(monthStart,weekStartsOn);
+  const heads=weekdayHeaders(weekStartsOn,"short");
+  const todayStr=today();
+  const filter=monthFilter();
+  const issues=conflictsThisMonth();
+  const open=openShiftsMonth(S.shifts,monthStart,filter);
+  const byDate={};
+  for(const s of filterMonthShifts(S.shifts,monthStart,filter))(byDate[s.date]||=[]).push(s);
+  for(const d of Object.keys(byDate))byDate[d].sort((a,b)=>(parseHHMM(a.start)||0)-(parseHHMM(b.start)||0));
+  const filtLabel=filter.type==="site"&&filter.id&&site(filter.id)?" · "+site(filter.id).name:filter.type==="employee"&&filter.id&&emp(filter.id)?" · "+emp(filter.id).name:"";
+  let h=`<div class="mprint"><h1>CMD Health Partners — Onsite Schedule</h1>
+    <p class="print-sub">${esc(formatMonthLabel(monthStart))}${esc(filtLabel)} · Monthly staffing</p>
+    <table class="mgrid"><thead><tr>${heads.map(n=>`<th>${esc(n)}</th>`).join("")}</tr></thead><tbody>`;
+  for(let i=0;i<grid.length;i+=7){
+    h+=`<tr>`;
+    for(const d of grid.slice(i,i+7)){
+      const list=byDate[d]||[];
+      const inM=inMonth(d,monthStart);
+      h+=`<td class="${inM?"":"out"} ${d===todayStr?"today":""}"><b>${parseDate(d).getDate()}</b>`;
+      for(const s of list){
+        const t=tpl(s.templateId),e=emp(s.employeeId),si=site(s.siteId);
+        const color=(t&&t.color)||"#444";
+        h+=`<div class="pchip" style="border-left-color:${safeColor(color)}"><b>${esc((t&&t.name)||"Custom")}</b> ${prettyTime(s.start)}–${prettyTime(s.end)}<br>${esc(e?e.name:"OPEN")}${filter.type!=="site"? " · "+esc(si?si.name:""):""}</div>`;
+      }
+      h+=`</td>`;
+    }
+    h+=`</tr>`;
+  }
+  h+=`</tbody></table></div>`;
+  h+=`<h2>Hours this month</h2><table class="pt tight"><thead><tr><th>Staff</th><th>Role</th><th>Hours</th></tr></thead><tbody>`;
+  for(const x of hoursByEmployeeMonth(S.shifts,S.employees,monthStart,filter)){
+    const e=emp(x.employeeId);if(!e)continue;
+    if(filter.type!=="all"&&!x.hours)continue;
+    h+=`<tr><td>${esc(e.name)}</td><td>${esc(e.role||"")}</td><td>${fmtHours(x.hours)}</td></tr>`;
+  }
+  h+=`</tbody></table>`;
+  if(open.length){h+=`<h2>Open shifts (${open.length})</h2><ul>`;for(const s of open){const si=site(s.siteId),t=tpl(s.templateId);h+=`<li>${esc(weekdayName(s.date,"short"))} ${esc(formatMD(s.date))} · ${esc((t&&t.name)||"Custom")} · ${esc(si?si.name:"")}</li>`;}h+=`</ul>`;}
+  if(issues.length){h+=`<h2>Conflicts</h2><ul>`;for(const c of issues){const e=emp(c.employeeId);h+=`<li>${esc(e?e.name:"Staff")}: ${esc(c.message)}</li>`;}h+=`</ul>`;}
+  $("printArea").innerHTML=h;
+  document.body.classList.add("printing");
+  const after=()=>{document.body.classList.remove("printing");window.removeEventListener("afterprint",after);};
+  window.addEventListener("afterprint",after);
+  window.print();
+}
+
+function downloadMonthCSV(){
+  const csv=formatMonthCSV(S.shifts,S.employees,S.sites,S.templates,UI.month,monthFilter());
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="CMD-schedule-"+startOfMonth(UI.month)+".csv";
+  document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);
+  toast("Month CSV ready. If it didn’t download, try Share from the Files preview.");
+}
+
 function cellShifts(mode,id,date){
   return S.shifts.filter(s=>s.date===date&&(mode==="site"?s.siteId===id:s.employeeId===id))
     .sort((a,b)=>(parseHHMM(a.start)||0)-(parseHHMM(b.start)||0));
@@ -688,7 +1059,8 @@ function shiftForm(opts){
   const isCustom=!chosenTpl||chosenTpl==="custom";
   const preview={employeeId:chosenEmp||null,start,end,date,id:existing?existing.id:"preview",siteId:chosenSite,templateId:chosenTpl&&chosenTpl!=="custom"?chosenTpl:null};
   const others=S.shifts.filter(s=>!existing||s.id!==existing.id);
-  const live=chosenEmp?findConflicts(others.concat(preview),{minRestHours:+S.settings.minRestHours||8,maxWeekHours:+S.settings.maxWeekHours||60,weekStart:UI.week}):[];
+  const weekOf=startOfWeek(date,S.settings.weekStartsOn);
+  const live=chosenEmp?findConflicts(others.concat(preview),{minRestHours:+S.settings.minRestHours||8,maxWeekHours:+S.settings.maxWeekHours||60,weekStart:weekOf}):[];
   let h=`<div class="sheet-h"><h2>${existing?"Edit shift":"Add shift"}</h2><button class="x" data-act="back-cell" aria-label="Back">✕</button></div>
     <p class="mut">${esc(weekdayName(date,"short")+" "+formatMD(date))}${mode==="site"&&site(id)? " · "+esc(site(id).name):""}${mode==="employee"&&emp(id)? " · "+esc(emp(id).name):""}</p>`;
   if(mode==="employee"||(existing&&!mode)){
@@ -720,8 +1092,8 @@ function shiftForm(opts){
     for(const e of S.employees){
       if(UI.roleFilt&&e.role!==UI.roleFilt)continue;
       if(filt&&!(e.name||"").toLowerCase().includes(filt))continue;
-      const hrs=weekHours(others.concat(preview.employeeId===e.id?preview:[]),e.id,UI.week);
-      const issues=findConflicts(others.concat({...preview,employeeId:e.id}),{minRestHours:+S.settings.minRestHours||8,maxWeekHours:+S.settings.maxWeekHours||60,weekStart:UI.week}).filter(c=>c.employeeId===e.id);
+      const hrs=weekHours(others.concat(preview.employeeId===e.id?preview:[]),e.id,weekOf);
+      const issues=findConflicts(others.concat({...preview,employeeId:e.id}),{minRestHours:+S.settings.minRestHours||8,maxWeekHours:+S.settings.maxWeekHours||60,weekStart:weekOf}).filter(c=>c.employeeId===e.id);
       h+=`<button type="button" class="pick ${chosenEmp===e.id?"on":""}" data-act="form-emp" data-id="${e.id}"><b>${esc(e.name)}</b><span class="mut">${esc(e.role||"")}${hrs? " · "+fmtHours(hrs)+"h this week":""}</span>${issues.length?`<span class="warn-inline">${esc(issues[0].message)}</span>`:""}</button>`;
     }
     if(!S.employees.length)h+=`<p class="mut">Add staff in Setup first.</p>`;
@@ -735,7 +1107,7 @@ function shiftForm(opts){
     const extra=(UI.sheet&&UI.sheet.extra)||0;
     const labs=[["Just this day",0],["+1 day",1],["+2 days",2],["+3 days",3],["Through week",null]];
     for(const[lab,n] of labs){
-      const val=n===null?Math.max(0,weekDates(UI.week).filter(d=>d>date).length):n;
+      const val=n===null?Math.max(0,weekDates(weekOf).filter(d=>d>date).length):n;
       const on=(UI.sheet&&UI.sheet.extra||0)===val&&(n!==null||extra===val);
       h+=`<button type="button" class="mini ${((UI.sheet&&UI.sheet.extra)||0)===val?"on":""}" data-act="form-extra" data-n="${val}">${lab}</button>`;
     }
@@ -771,14 +1143,16 @@ function refreshForm(){
 }
 
 function beginAdd(mode,id,date){
-  UI.sheet={type:"add",mode,id,date,templateId:S.templates[0]?S.templates[0].id:"",employeeId:mode==="employee"?id:"",siteId:mode==="site"?id:"",extra:0};
+  const from=UI.sheet&&UI.sheet.from;
+  UI.sheet={type:"add",mode,id,date,templateId:S.templates[0]?S.templates[0].id:"",employeeId:mode==="employee"?id:"",siteId:mode==="site"?id:"",extra:0,from};
   shiftForm({mode,id,date,existing:null});
 }
 function beginEdit(sid){
   const s=S.shifts.find(x=>x.id===sid);if(!s)return;
-  const mode=UI.sheet&&UI.sheet.mode?UI.sheet.mode:"site";
-  const id=mode==="site"?s.siteId:s.employeeId;
-  UI.sheet={type:"edit",mode,id,date:s.date,sid:s.id,templateId:s.templateId||"custom",employeeId:s.employeeId||"",siteId:s.siteId,start:s.start,end:s.end,extra:0};
+  const from=UI.sheet&&(UI.sheet.from||(UI.sheet.type==="dayDetail"?"dayDetail":null));
+  const mode=UI.sheet&&UI.sheet.mode==="employee"?"employee":"site";
+  const id=mode==="employee"?s.employeeId:s.siteId;
+  UI.sheet={type:"edit",mode,id,date:s.date,sid:s.id,templateId:s.templateId||"custom",employeeId:s.employeeId||"",siteId:s.siteId,start:s.start,end:s.end,extra:0,from};
   shiftForm({mode,id:id,date:s.date,existing:s});
 }
 
@@ -835,7 +1209,7 @@ function showCopyDay(fromDate){
   const targets=(UI.sheet&&UI.sheet.type==="copyDay"&&UI.sheet.targets)||[];
   UI.copyFrom=fromDate;
   UI.sheet={type:"copyDay",date:fromDate,targets};
-  const dates=weekDates(UI.week);
+  const dates=UI.cal==="month"?monthDates(UI.month):weekDates(UI.week);
   const n=S.shifts.filter(s=>s.date===fromDate).length;
   let h=`<div class="sheet-h"><h2>Copy ${esc(weekdayName(fromDate,"short"))} ${esc(formatMD(fromDate))}</h2><button class="x" data-act="close">✕</button></div>
     <p class="mut">${n} shift${n===1?"":"s"} — tap one or more days to paste onto.</p>
@@ -1002,6 +1376,9 @@ function renderExport(){
   let h=`<div class="card"><h2>Share this week</h2><p class="mut">${esc(formatWeekLabel(UI.week))}</p>
     <button data-act="print-week">Print / save PDF</button>
     <button class="s" data-act="csv-week">Download CSV spreadsheet</button></div>
+    <div class="card"><h2>Share this month</h2><p class="mut">${esc(formatMonthLabel(UI.month))}</p>
+    <button data-act="print-month">Print / save PDF</button>
+    <button class="s" data-act="csv-month">Download CSV spreadsheet</button></div>
     <div class="card"><h2>Text a person their shifts</h2>`;
   if(!S.employees.length)h+=`<p class="mut">No staff yet.</p>`;
   for(const e of S.employees){
@@ -1115,8 +1492,8 @@ function goTab(tab){
 }
 
 function render(){
-  $("hdr").textContent=formatWeekLabel(UI.week);
-  if(UI.tab==="week")renderWeek();
+  $("hdr").textContent=UI.tab==="week"&&UI.cal==="month"?formatMonthLabel(UI.month):formatWeekLabel(UI.week);
+  if(UI.tab==="week"){if(UI.cal==="month")renderMonth();else renderWeek();}
   if(UI.tab==="today")renderToday();
   if(UI.tab==="hours")renderHours();
   if(UI.tab==="setup")renderSetup();
@@ -1132,16 +1509,31 @@ document.addEventListener("click",ev=>{
   if(act==="prev-week"){UI.week=addDays(UI.week,-7);render();return;}
   if(act==="next-week"){UI.week=addDays(UI.week,7);render();return;}
   if(act==="this-week"){UI.week=startOfWeek(today(),S.settings.weekStartsOn);render();return;}
+  if(act==="cal"){
+    UI.cal=btn.dataset.cal==="month"?"month":"week";
+    if(UI.cal==="month")UI.month=startOfMonth(UI.week);
+    else UI.week=startOfWeek(inMonth(today(),UI.month)?today():startOfMonth(UI.month),S.settings.weekStartsOn);
+    render();return;
+  }
+  if(act==="prev-month"){UI.month=addMonths(UI.month,-1);UI.week=startOfWeek(UI.month,S.settings.weekStartsOn);render();return;}
+  if(act==="next-month"){UI.month=addMonths(UI.month,1);UI.week=startOfWeek(UI.month,S.settings.weekStartsOn);render();return;}
+  if(act==="this-month"){UI.month=startOfMonth(today());UI.week=startOfWeek(today(),S.settings.weekStartsOn);render();return;}
+  if(act==="mfilt"){
+    UI.mfiltType=btn.dataset.type||"all";
+    UI.mfiltId="";
+    ensureMonthFiltId();
+    render();return;
+  }
+  if(act==="month-day"){showDayDetail(btn.dataset.date);return;}
+  if(act==="add-day-shift"){beginAddFromDay(btn.dataset.date);return;}
+  if(act==="add-day-site"){beginAddFromDay(btn.dataset.date,btn.dataset.id);return;}
   if(act==="mode"){UI.mode=btn.dataset.mode;S.settings.viewMode=UI.mode;save();render();return;}
   if(act==="cell"){showCell(btn.dataset.mode,btn.dataset.id,btn.dataset.date);return;}
   if(act==="day-menu"){showDayMenu(btn.dataset.date);return;}
   if(act==="add-shift"){beginAdd(btn.dataset.mode,btn.dataset.id,btn.dataset.date);return;}
   if(act==="edit-shift"){beginEdit(btn.dataset.sid);return;}
-  if(act==="back-cell"){
-    if(UI.sheet)showCell(UI.sheet.mode,UI.sheet.id,UI.sheet.date);
-    else closeSheet();
-    return;
-  }
+  if(act==="back-cell"){returnToDayOrCell();return;}
+  if(act==="back-day"){showDayDetail(btn.dataset.date||(UI.sheet&&UI.sheet.date));return;}
   if(act==="form-tpl"){
     UI.sheet.templateId=btn.dataset.id;
     if(btn.dataset.id!=="custom"&&tpl(btn.dataset.id)){UI.sheet.start=tpl(btn.dataset.id).start;UI.sheet.end=tpl(btn.dataset.id).end;}
@@ -1246,12 +1638,14 @@ document.addEventListener("click",ev=>{
   }
   if(act==="week-start"){
     const n=+btn.dataset.n;const todayIn=today();
-    S.settings.weekStartsOn=n;UI.week=startOfWeek(todayIn,n);save();render();return;
+    S.settings.weekStartsOn=n;UI.week=startOfWeek(todayIn,n);UI.month=startOfMonth(UI.month||todayIn);save();render();return;
   }
   if(act==="share-emp"){shareEmp(btn.dataset.id,false);return;}
   if(act==="sms-emp"){shareEmp(btn.dataset.id,true);return;}
   if(act==="print-week"){printWeek();return;}
   if(act==="csv-week"){downloadCSV();return;}
+  if(act==="print-month"){printMonth();return;}
+  if(act==="csv-month"){downloadMonthCSV();return;}
   if(act==="export-json"){exportJSON();return;}
   if(act==="import-json"){importJSON();return;}
   if(act==="go-sync"){goTab("setup");setTimeout(()=>{const el=$("syncCard");if(el)el.scrollIntoView({behavior:"smooth",block:"start"});},50);return;}
