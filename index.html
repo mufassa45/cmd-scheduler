@@ -95,6 +95,11 @@ button.mini.on{background:var(--navy);color:#fff}
 ul.plain{margin:0;padding-left:18px}
 #toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(16px);background:var(--navy);color:#fff;padding:12px 18px;border-radius:12px;opacity:0;pointer-events:none;z-index:30;transition:.2s;max-width:90vw;text-align:center;font-weight:600}
 #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+header .hdr-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+header .sync-chip{width:auto;min-height:36px;margin:0;padding:6px 10px;font-size:12px;background:#ffffff22;color:#fff;flex:0 0 auto;max-width:48%;line-height:1.25;text-align:center;font-weight:600}
+header .sync-chip.st-warn{background:#d97706}
+header .sync-chip.st-bad{background:#b91c1c}
+.sync-status{margin-bottom:10px}
 #printArea{display:none}
 @media print{
   nav,header,.no-print,#mask,#sheet,#toast,main>.sec{display:none!important}
@@ -110,7 +115,8 @@ ul.plain{margin:0;padding-left:18px}
   #printArea h2{font-size:14px;margin:14px 0 6px}
 }
 </style></head><body>
-<header><h1>CMD Onsite Schedule</h1><small id="hdr"></small></header>
+<header><div class="hdr-row"><div><h1>CMD Onsite Schedule</h1><small id="hdr"></small></div>
+<button type="button" class="sync-chip" id="syncChip" data-act="go-sync">Sync</button></div></header>
 <main>
 <section class="sec on" id="s-week"><div id="weekOut"></div></section>
 <section class="sec" id="s-today"><div id="todayOut"></div></section>
@@ -284,21 +290,262 @@ function emptyState(){
   return{employees:seed.employees,sites:seed.sites,templates:DEFAULT_TPL.map(t=>({...t})),shifts:seed.shifts,settings:{minRestHours:8,maxWeekHours:60,weekStartsOn:0,viewMode:"site"}};
 }
 
+function normalizeState(d){
+  if(!d||typeof d!=="object")return emptyState();
+  return{
+    employees:Array.isArray(d.employees)?d.employees.slice():[],
+    sites:Array.isArray(d.sites)?d.sites.slice():[],
+    templates:Array.isArray(d.templates)&&d.templates.length?d.templates.slice():DEFAULT_TPL.map(t=>({...t})),
+    shifts:Array.isArray(d.shifts)?d.shifts.slice():[],
+    settings:Object.assign({minRestHours:8,maxWeekHours:60,weekStartsOn:0,viewMode:"site"},d.settings||{})
+  };
+}
 function load(){
   try{
     const raw=localStorage.getItem(K);
     if(!raw)return emptyState();
-    const d=JSON.parse(raw);
-    if(!d||typeof d!=="object")return emptyState();
-    d.employees=Array.isArray(d.employees)?d.employees:[];
-    d.sites=Array.isArray(d.sites)?d.sites:[];
-    d.templates=Array.isArray(d.templates)&&d.templates.length?d.templates:DEFAULT_TPL.map(t=>({...t}));
-    d.shifts=Array.isArray(d.shifts)?d.shifts:[];
-    d.settings=Object.assign({minRestHours:8,maxWeekHours:60,weekStartsOn:0,viewMode:"site"},d.settings||{});
-    return d;
+    return normalizeState(JSON.parse(raw));
   }catch(e){return emptyState();}
 }
-function save(){localStorage.setItem(K,JSON.stringify(S));}
+function save(opts){
+  localStorage.setItem(K,JSON.stringify(S));
+  if(!(opts&&opts.skipSync))schedulePush();
+}
+
+// ----- cloud sync (Supabase RPC; publishable key is safe to embed) -----
+const SB_URL="https://tgjhyvcbkhowdipqlsge.supabase.co";
+const SB_KEY="sb_publishable_-7Mt7CEzVi8tcix62PLCrA_jwzbMmRz";
+const SYNC_K="cmd_sched_sync_v1";
+const BACKUP_K="cmd_sched_v1_bak";
+
+function loadSync(){
+  try{
+    const raw=localStorage.getItem(SYNC_K);
+    if(!raw)return{id:"cmd",pass:"",lastRemote:null,lastOk:null,status:"off"};
+    const d=JSON.parse(raw);
+    const pass=typeof d.pass==="string"?d.pass:"";
+    return{
+      id:typeof d.id==="string"&&d.id.trim()?d.id:"cmd",
+      pass,
+      lastRemote:d.lastRemote||null,
+      lastOk:d.lastOk||null,
+      status:pass.length>=6?"pending":"off"
+    };
+  }catch(e){return{id:"cmd",pass:"",lastRemote:null,lastOk:null,status:"off"};}
+}
+function saveSyncMeta(){
+  localStorage.setItem(SYNC_K,JSON.stringify({id:SYNC.id,pass:SYNC.pass,lastRemote:SYNC.lastRemote,lastOk:SYNC.lastOk}));
+}
+const SYNC=loadSync();
+let syncTimer=null,syncBusy=false,pendingPush=false,conflictOpen=false;
+
+function canSync(){return!!(SYNC.pass&&SYNC.pass.length>=6);}
+function syncId(){return(SYNC.id||"cmd").trim().toLowerCase()||"cmd";}
+function fmtSyncTime(ms){
+  try{return new Date(ms).toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"});}
+  catch(e){return"";}
+}
+function syncStatusLabel(){
+  const st=SYNC.status;
+  if(st==="syncing")return"Syncing…";
+  if(st==="bad")return"Wrong passcode";
+  if(st==="offline")return"Offline";
+  if(st==="ok"&&SYNC.lastOk)return"Synced "+fmtSyncTime(SYNC.lastOk);
+  if(st==="ok")return"Synced";
+  if(canSync())return"Not synced yet";
+  return"Sync off";
+}
+function updateSyncUI(){
+  const chip=$("syncChip");
+  if(chip){
+    chip.textContent=syncStatusLabel();
+    chip.classList.toggle("st-bad",SYNC.status==="bad");
+    chip.classList.toggle("st-warn",SYNC.status==="offline");
+  }
+  const el=$("syncStatus");
+  if(!el)return;
+  el.className="banner sync-status"+(SYNC.status==="bad"||SYNC.status==="offline"?" warn":"");
+  let msg=syncStatusLabel()+".";
+  if(SYNC.status==="bad")msg="Wrong passcode. Use the same passcode that first saved this schedule name, or pick a new name.";
+  else if(SYNC.status==="offline")msg="Offline. Your changes stay on this device and will sync when you’re back online.";
+  else if(SYNC.status==="ok")msg="Synced"+(SYNC.lastOk?" at "+fmtSyncTime(SYNC.lastOk):"")+". Phone and computer stay in sync when both use this name and passcode.";
+  else if(!canSync())msg="Turn on sync so your phone and computer share the same schedule. Pick a passcode you’ll remember — it’s the only way to open this schedule.";
+  else if(SYNC.status==="syncing")msg="Syncing…";
+  el.textContent=msg;
+}
+async function sbRpc(fn,payload){
+  const headers={"apikey":SB_KEY,"Content-Type":"application/json"};
+  const fire=()=>fetch(SB_URL+"/rest/v1/rpc/"+fn,{method:"POST",headers,body:JSON.stringify(payload)});
+  let res=await fire();
+  if(res.status===401||res.status===403){
+    headers.Authorization="Bearer "+SB_KEY;
+    res=await fire();
+  }
+  const text=await res.text();
+  let json=null;
+  try{json=text===""?null:JSON.parse(text);}catch(e){json=null;}
+  if(!res.ok){
+    const msg=(json&&(json.message||json.error||json.hint))||text||("HTTP "+res.status);
+    const err=new Error(msg);
+    err.status=res.status;
+    err.code=json&&json.code;
+    throw err;
+  }
+  return json;
+}
+function isBadPass(err){return/bad passcode/i.test((err&&err.message)||"");}
+function isOfflineErr(err){
+  if(typeof navigator!=="undefined"&&navigator.onLine===false)return true;
+  return/failed to fetch|networkerror|load failed|offline/i.test((err&&err.message)||"");
+}
+async function rpcWithRetry(fn,payload){
+  let last;
+  for(let i=0;i<4;i++){
+    try{return await sbRpc(fn,payload);}
+    catch(err){
+      last=err;
+      if(err&&(err.status===404||err.code==="PGRST202")){
+        await new Promise(r=>setTimeout(r,1500*(i+1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw last;
+}
+function handleSyncError(err){
+  if(isBadPass(err)){SYNC.status="bad";updateSyncUI();toast("Wrong passcode.");return;}
+  SYNC.status="offline";
+  updateSyncUI();
+  if(!isOfflineErr(err))console.warn("sync",err);
+}
+function hasBackup(){
+  try{const r=localStorage.getItem(BACKUP_K);return!!(r&&JSON.parse(r).data);}catch(e){return false;}
+}
+function applyRemote(data,updatedAt){
+  try{localStorage.setItem(BACKUP_K,JSON.stringify({at:new Date().toISOString(),data:S}));}catch(e){}
+  S=normalizeState(data);
+  UI.mode=S.settings.viewMode||UI.mode||"site";
+  save({skipSync:true});
+  SYNC.lastRemote=updatedAt;
+  SYNC.lastOk=Date.now();
+  SYNC.status="ok";
+  saveSyncMeta();
+  updateSyncUI();
+  render();
+}
+async function pullNow(opts){
+  const silent=opts&&opts.silent;
+  if(!canSync()||conflictOpen||syncBusy)return null;
+  syncBusy=true;
+  if(!silent){SYNC.status="syncing";updateSyncUI();}
+  try{
+    const remote=await rpcWithRetry("get_schedule",{p_id:syncId(),p_pass:SYNC.pass});
+    if(remote&&remote.data!=null){
+      const remoteAt=remote.updated_at;
+      const newer=!SYNC.lastRemote||new Date(remoteAt)>new Date(SYNC.lastRemote);
+      if(newer){
+        applyRemote(remote.data,remoteAt);
+        toast(silent?"Updated from the cloud.":"Updated from the cloud. A backup of the previous copy was saved.");
+      }else{
+        SYNC.status="ok";
+        SYNC.lastOk=Date.now();
+        saveSyncMeta();
+        updateSyncUI();
+      }
+    }else if(!SYNC.lastRemote){
+      syncBusy=false;
+      await pushNow({force:true,created:true});
+      return null;
+    }else{
+      SYNC.status="ok";
+      updateSyncUI();
+    }
+    return remote;
+  }catch(err){
+    handleSyncError(err);
+    return null;
+  }finally{
+    syncBusy=false;
+    if(pendingPush){pendingPush=false;schedulePush();}
+  }
+}
+async function pushNow(opts){
+  const force=opts&&opts.force;
+  const created=opts&&opts.created;
+  if(!canSync()||conflictOpen)return;
+  if(syncBusy){pendingPush=true;return;}
+  syncBusy=true;
+  SYNC.status="syncing";
+  updateSyncUI();
+  try{
+    if(!force){
+      let remote=null;
+      try{remote=await rpcWithRetry("get_schedule",{p_id:syncId(),p_pass:SYNC.pass});}
+      catch(err){handleSyncError(err);return;}
+      if(remote&&remote.updated_at&&SYNC.lastRemote&&new Date(remote.updated_at)>new Date(SYNC.lastRemote)){
+        conflictOpen=true;
+        syncBusy=false;
+        const pullFirst=confirm("This schedule was changed on another device since this one last synced.\n\nOK — pull the cloud copy first (this device’s current copy is backed up).\nCancel — overwrite the cloud with this device.");
+        conflictOpen=false;
+        if(pullFirst){
+          applyRemote(remote.data,remote.updated_at);
+          toast("Loaded the cloud copy. A backup of this device’s previous copy was saved.");
+          return;
+        }
+        syncBusy=true;
+      }
+    }
+    const ts=await rpcWithRetry("save_schedule",{p_id:syncId(),p_pass:SYNC.pass,p_data:S});
+    SYNC.lastRemote=ts;
+    SYNC.lastOk=Date.now();
+    SYNC.status="ok";
+    saveSyncMeta();
+    updateSyncUI();
+    if(created)toast("This device’s schedule is now in the cloud.");
+  }catch(err){
+    handleSyncError(err);
+  }finally{
+    syncBusy=false;
+    if(pendingPush){pendingPush=false;schedulePush();}
+  }
+}
+function schedulePush(){
+  if(!canSync())return;
+  clearTimeout(syncTimer);
+  syncTimer=setTimeout(()=>{pushNow();},1500);
+}
+function startSyncLoop(){
+  setInterval(()=>{if(document.visibilityState==="visible")pullNow({silent:true});},30000);
+  window.addEventListener("focus",()=>{if(canSync())pullNow({silent:true});});
+  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&canSync())pullNow({silent:true});});
+  window.addEventListener("online",()=>{if(canSync())pullNow({silent:true});});
+  if(canSync())pullNow({silent:true});
+}
+function connectSyncFromForm(){
+  const idEl=$("syncId"),passEl=$("syncPass");
+  const id=((idEl&&idEl.value)||"cmd").trim()||"cmd";
+  const pass=((passEl&&passEl.value)||"").trim();
+  if(pass.length<6){toast("Passcode needs at least 6 characters.");return;}
+  const changed=id!==SYNC.id||pass!==SYNC.pass;
+  SYNC.id=id;
+  SYNC.pass=pass;
+  if(changed)SYNC.lastRemote=null;
+  saveSyncMeta();
+  pullNow();
+}
+function restoreBackup(){
+  const raw=localStorage.getItem(BACKUP_K);
+  if(!raw){toast("No backup to restore.");return;}
+  if(!confirm("Restore the copy from just before the last cloud update? This will also sync that copy to the cloud."))return;
+  try{
+    const bak=JSON.parse(raw);
+    S=normalizeState(bak.data);
+    save();
+    render();
+    toast("Restored the previous copy.");
+  }catch(e){toast("Couldn’t read the backup.");}
+}
 
 let S=load();
 let UI={week:startOfWeek(today(),S.settings.weekStartsOn),mode:S.settings.viewMode||"site",tab:"week",sheet:null,toastT:null,copyFrom:null,roleFilt:"",empFilt:""};
@@ -661,9 +908,26 @@ function renderHours(){
 }
 
 function renderSetup(){
+  const draft=(document.activeElement&&(document.activeElement.id==="syncId"||document.activeElement.id==="syncPass"))
+    ?{id:$("syncId")&&$("syncId").value,pass:$("syncPass")&&$("syncPass").value,focus:document.activeElement.id,pos:document.activeElement.selectionStart}
+    :(UI.syncDraft||null);
+  const shownId=draft&&draft.id!=null?draft.id:(SYNC.id||"cmd");
+  const shownPass=draft&&draft.pass!=null?draft.pass:(SYNC.pass||"");
   let h="";
   if(hasExamples())h+=`<div class="banner no-print"><b>Example data is loaded</b> (names start with “Example – delete”).
     <button class="s" data-act="clear-examples">Clear examples</button></div>`;
+  h+=`<div class="card" id="syncCard"><h2>Sync across devices</h2>
+    <p class="mut">Enter the same schedule name and passcode on your phone and your computer. The first device to save a name creates it; other devices use that same passcode to join.</p>
+    <div id="syncStatus" class="banner sync-status"></div>
+    <label>Schedule name</label>
+    <input id="syncId" value="${esc(shownId)}" autocomplete="off" autocapitalize="none" spellcheck="false">
+    <label>Passcode (at least 6 characters)</label>
+    <input id="syncPass" type="password" value="${esc(shownPass)}" autocomplete="new-password">
+    <button data-act="sync-save">${canSync()?"Save and sync":"Turn on sync"}</button>
+    ${canSync()?`<button class="s" data-act="sync-now">Sync now</button>`:""}
+    ${hasBackup()?`<button class="s" data-act="sync-restore">Restore previous copy</button>`:""}
+    <p class="mut">Works offline. Changes save on this device and sync when you’re back online.</p>
+  </div>`;
   h+=`<div class="card"><h2>Staff</h2><p class="mut">One-time list. After this, you only tap names on the board.</p>`;
   if(!S.employees.length)h+=`<p class="mut">No staff yet.</p>`;
   h+=`<ul class="editlist">`;
@@ -694,6 +958,12 @@ function renderSetup(){
   const rest=$("setRest"),mx=$("setMax");
   if(rest)rest.addEventListener("change",()=>{S.settings.minRestHours=Math.max(0,+rest.value||0);save();render();});
   if(mx)mx.addEventListener("change",()=>{S.settings.maxWeekHours=Math.max(1,+mx.value||60);save();render();});
+  updateSyncUI();
+  if(draft&&draft.focus){
+    const el=$(draft.focus);
+    if(el){el.focus();if(draft.pos!=null)try{el.setSelectionRange(draft.pos,draft.pos);}catch(e){}}
+    UI.syncDraft=null;
+  }
 }
 
 function empForm(existing){
@@ -743,7 +1013,7 @@ function renderExport(){
     <button class="s" data-act="export-json">Export backup (copy JSON)</button>
     <button class="s" data-act="import-json">Import backup</button></div>
     ${hasExamples()?`<div class="card"><button class="s" data-act="clear-examples">Clear example data</button></div>`:""}
-    <div class="card mut"><p>CMD Health Partners · Onsite schedule · Data stays on this phone.</p></div>`;
+    <div class="card mut"><p>CMD Health Partners · Onsite schedule · Data stays on this device. Turn on Sync in Setup to share the same schedule on your phone and computer.</p></div>`;
   $("exportOut").innerHTML=h;
 }
 
@@ -851,6 +1121,7 @@ function render(){
   if(UI.tab==="hours")renderHours();
   if(UI.tab==="setup")renderSetup();
   if(UI.tab==="export")renderExport();
+  updateSyncUI();
 }
 
 document.addEventListener("click",ev=>{
@@ -983,6 +1254,10 @@ document.addEventListener("click",ev=>{
   if(act==="csv-week"){downloadCSV();return;}
   if(act==="export-json"){exportJSON();return;}
   if(act==="import-json"){importJSON();return;}
+  if(act==="go-sync"){goTab("setup");setTimeout(()=>{const el=$("syncCard");if(el)el.scrollIntoView({behavior:"smooth",block:"start"});},50);return;}
+  if(act==="sync-save"){connectSyncFromForm();return;}
+  if(act==="sync-now"){if(!canSync()){toast("Enter a passcode of at least 6 characters, then tap Turn on sync.");return;}pullNow();return;}
+  if(act==="sync-restore"){restoreBackup();return;}
 });
 
 document.querySelectorAll("nav button").forEach(b=>b.addEventListener("click",()=>goTab(b.dataset.s)));
@@ -992,5 +1267,7 @@ const icon="data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.o
 $("mf").href=URL.createObjectURL(new Blob([JSON.stringify({name:"CMD Onsite Schedule",short_name:"CMD Schedule",start_url:location.href.split("#")[0],display:"standalone",background_color:"#f4f6f6",theme_color:"#0f3d4c",icons:[{src:icon,sizes:"512x512",type:"image/svg+xml",purpose:"any"}]})],{type:"application/manifest+json"}));
 if("serviceWorker"in navigator&&location.protocol.startsWith("http"))navigator.serviceWorker.register("sw.js").catch(()=>{});
 render();
+updateSyncUI();
+startSyncLoop();
 
 </script></body></html>
